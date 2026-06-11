@@ -1,6 +1,6 @@
-# FinTrack Lite
+# Personal Fint
 
-FinTrack Lite is a full stack web application developed as part of a DevOps practices workshop.
+Personal Fint is a full stack web application developed as part of a DevOps practices workshop.
 
 The project focuses on building a simple personal budget control application while applying a modern development and deployment workflow.
 
