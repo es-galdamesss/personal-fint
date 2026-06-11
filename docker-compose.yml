@@ -1,0 +1,48 @@
+# Docker Compose configuration for Fintrack
+# Runs the PostgreSQL database and the Next.js full-stack application.
+
+services:
+  # PostgreSQL database service
+  postgres:
+    image: postgres:16-alpine
+    container_name: fintrack-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-fintrack_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintrack_password}
+      POSTGRES_DB: ${POSTGRES_DB:-fintrack_db}
+    ports:
+      # Expose the database port to the host so local development on host machine can connect via localhost
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # Verify that PostgreSQL is ready to accept connections before starting the web container
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-fintrack_user} -d $${POSTGRES_DB:-fintrack_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Next.js web application service
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fintrack-web
+    restart: always
+    ports:
+      # Map host port 3001 to container port 3000 to avoid conflicts with host-based Next.js dev servers
+      - "3001:3000"
+    environment:
+      # Connect using the Docker service name 'postgres' rather than 'localhost' inside the Docker network
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-fintrack_user}:${POSTGRES_PASSWORD:-fintrack_password}@postgres:5432/${POSTGRES_DB:-fintrack_db}?schema=public
+      - NODE_ENV=production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Deploy Prisma migrations automatically when the container starts, then launch the Next.js application
+    command: sh -c "pnpm prisma:deploy && pnpm start"
+
+volumes:
+  # Persistent volume to store PostgreSQL data
+  postgres_data:

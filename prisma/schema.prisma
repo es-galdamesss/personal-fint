@@ -1,0 +1,154 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Indicates how an Expense was created.
+enum ExpenseSource {
+  MANUAL
+  RECURRING
+}
+
+/// Possible statuses for a one-month override on a RecurringExpense.
+enum RecurringOverrideStatus {
+  AMOUNT_CHANGED
+  CANCELLED
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Models
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Expense category (e.g. Food, Transport, Housing).
+/// Soft-deleted via isActive = false. Do NOT physically delete categories with history.
+model Category {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?
+  color       String?
+  icon        String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  expenses          Expense[]
+  recurringExpenses RecurringExpense[]
+  categoryLimits    CategoryLimit[]
+
+  @@map("categories")
+}
+
+/// General monthly budget (one per year/month combination).
+/// Amounts stored as integers in CLP (no decimals).
+model MonthlyBudget {
+  id        String   @id @default(cuid())
+  year      Int
+  month     Int
+  amount    Int // CLP, must be > 0
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  categoryLimits CategoryLimit[]
+
+  @@unique([year, month])
+  @@map("monthly_budgets")
+}
+
+/// Monthly spending limit for a specific category inside a MonthlyBudget.
+/// Deleted when the parent MonthlyBudget is deleted (cascade).
+/// Historical limits are preserved even if the category becomes inactive.
+model CategoryLimit {
+  id         String   @id @default(cuid())
+  budgetId   String
+  categoryId String
+  amount     Int // CLP, must be > 0
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  budget   MonthlyBudget @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  category Category      @relation(fields: [categoryId], references: [id])
+
+  @@unique([budgetId, categoryId])
+  @@map("category_limits")
+}
+
+/// A real, counted expense entry.
+/// source = MANUAL    → created by the user.
+/// source = RECURRING → auto-generated from a RecurringExpense.
+/// The unique constraint on (recurringExpenseId, date) prevents duplicate
+/// automatic charges for the same recurring expense on the same date.
+model Expense {
+  id                 String        @id @default(cuid())
+  description        String
+  amount             Int // CLP, must be > 0
+  date               DateTime
+  source             ExpenseSource @default(MANUAL)
+  categoryId         String
+  recurringExpenseId String?
+  notes              String?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  category         Category          @relation(fields: [categoryId], references: [id])
+  recurringExpense RecurringExpense? @relation(fields: [recurringExpenseId], references: [id])
+
+  @@unique([recurringExpenseId, date])
+  @@index([date])
+  @@index([categoryId])
+  @@map("expenses")
+}
+
+/// Template for a monthly recurring expense.
+/// chargeDay: 1–31. isActive = false → no future expenses are generated.
+/// Amounts stored as integers in CLP.
+model RecurringExpense {
+  id            String   @id @default(cuid())
+  description   String
+  defaultAmount Int // CLP, must be > 0
+  startDate     DateTime
+  chargeDay     Int // 1–31
+  isActive      Boolean  @default(true)
+  categoryId    String
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  category  Category                   @relation(fields: [categoryId], references: [id])
+  expenses  Expense[]
+  overrides RecurringExpenseOverride[]
+
+  @@index([categoryId])
+  @@map("recurring_expenses")
+}
+
+/// One-month modification for a recurring expense.
+/// AMOUNT_CHANGED → customAmount must be > 0.
+/// CANCELLED      → customAmount must be null.
+/// Unique per (recurringExpenseId, year, month).
+model RecurringExpenseOverride {
+  id                 String                  @id @default(cuid())
+  recurringExpenseId String
+  year               Int
+  month              Int
+  status             RecurringOverrideStatus
+  customAmount       Int? // CLP; only set when status = AMOUNT_CHANGED
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+
+  recurringExpense RecurringExpense @relation(fields: [recurringExpenseId], references: [id])
+
+  @@unique([recurringExpenseId, year, month])
+  @@map("recurring_expense_overrides")
+}
